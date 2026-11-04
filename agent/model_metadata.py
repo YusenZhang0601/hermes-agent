@@ -21,6 +21,7 @@ from agent import model_metadata_http
 from agent.model_metadata_cache import _write_context_cache, locked_context_cache
 from agent.model_metadata_llamacpp import llamacpp_context
 from agent.model_metadata_memo_bounds import MEMO_LOCK, bound_codex_caches, remember_endpoint_models as _remember_endpoint_models
+from agent.model_metadata_probe import _localhost_to_ipv4, _probe_trust_env
 
 from utils import atomic_json_write, base_url_host_matches, base_url_hostname
 
@@ -712,14 +713,6 @@ def is_local_endpoint(base_url: str) -> bool:
     return first == 10 or (first == 172 and 16 <= second <= 31) or (first == 192 and second == 168) or (first == 100 and 64 <= second <= 127)
 
 
-def _localhost_to_ipv4(url: str) -> str:
-    """``localhost`` HOST -> ``127.0.0.1`` (Windows dual-stack resolves ::1 first and pays a ~2s IPv6
-    connect timeout on IPv4-only servers). Scheme-anchored so ``?upstream=http://localhost`` is untouched."""
-    if not url or not isinstance(url, str):
-        return url  # non-string values (test doubles, lazy config) pass through
-    return re.sub(r"^(https?://)localhost(?=[:/]|$)", r"\g<1>127.0.0.1", url, count=1)
-
-
 def detect_local_server_type(base_url: str, api_key: str = "") -> Optional[str]:
     """Probe known endpoints: "ollama", "lm-studio", "vllm", "llamacpp", or None (TTL-cached)."""
     import httpx
@@ -754,7 +747,7 @@ def detect_local_server_type(base_url: str, api_key: str = "") -> Optional[str]:
     )
     result: Optional[str] = None
     try:
-        with httpx.Client(timeout=2.0, headers=_auth_headers(api_key), verify=model_metadata_http.resolve_verify(base_url)) as client:
+        with httpx.Client(timeout=2.0, headers=_auth_headers(api_key), verify=model_metadata_http.resolve_verify(base_url), trust_env=_probe_trust_env(base_url)) as client:
             for name, urls, check in waterfall:
                 try:
                     for url in urls:
@@ -1411,7 +1404,7 @@ def _ollama_show(server_url: str, api_key: str, bare_model: str, timeout: float 
     """Ollama ``/api/show`` JSON for ``bare_model``, or None on any failure (``note_blackhole``: connect timeouts condemn the host)."""
     import httpx
     try:
-        with httpx.Client(timeout=timeout, headers=_auth_headers(api_key), verify=model_metadata_http.resolve_verify(server_url)) as client:
+        with httpx.Client(timeout=timeout, headers=_auth_headers(api_key), verify=model_metadata_http.resolve_verify(server_url), trust_env=_probe_trust_env(server_url)) as client:
             resp = client.post(f"{server_url}/api/show", json={"name": bare_model})
             return resp.json() if resp.status_code == 200 else None
     except Exception as exc:
@@ -1619,7 +1612,7 @@ def _query_local_context_length_uncached(model: str, base_url: str, api_key: str
     }.get(server_type)
     probes = ([typed] if typed else []) + [_model_detail_ctx, lambda client: _openai_models_list_context(client, server_url, model)]
     try:
-        with httpx.Client(timeout=3.0, headers=_auth_headers(api_key), verify=model_metadata_http.resolve_verify(base_url)) as client:
+        with httpx.Client(timeout=3.0, headers=_auth_headers(api_key), verify=model_metadata_http.resolve_verify(base_url), trust_env=_probe_trust_env(base_url)) as client:
             return next((ctx for ctx in (probe(client) for probe in probes) if ctx is not None), None)
     except Exception as exc:
         _note_if_connect_timeout(exc, server_url)
