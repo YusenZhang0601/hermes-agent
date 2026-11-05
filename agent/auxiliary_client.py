@@ -4987,12 +4987,8 @@ def _resolve_custom_branch(req: _ResolveRequest) -> _ResolveResult:
             # host base_url names is never intended. Explicit api_key or the placeholder only.
             custom_key = _normalize_api_key(req.explicit_api_key) or "no-key-required"
         else:
-            custom_key = (
-                _normalize_api_key(req.explicit_api_key)
-                or _scoped_key_env("OPENAI_API_KEY")
-                or _read_main_api_key_if_same_origin(custom_base)
-                or "no-key-required"  # local servers don't need auth
-            )
+            from agent.auxiliary_custom_auth import custom_endpoint_api_key
+            custom_key = custom_endpoint_api_key(req.explicit_api_key, custom_base, main_runtime)
         if not custom_base:
             logger.warning("resolve_provider_client: explicit custom endpoint requested but base_url is empty")
             return None, None
