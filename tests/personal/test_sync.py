@@ -80,8 +80,8 @@ def test_published_version_moves_only_after_hosted_validation(repository, tmp_pa
     git(root, "add", ".")
     git(root, "commit", "-m", "personal configuration")
     original = git(root, "rev-parse", "HEAD")
-    git(root, "branch", "personal/stable")
-    published = tmp_path / "published.git"
+    git(root, "branch", "-m", "personal", "personal/stable")
+    published = root.parent / f"{root.name}-published.git"
     git(root, "clone", "--bare", str(root), str(published))
     git(root, "checkout", "official")
     (root / "official.txt").write_text("official feature\n", encoding="utf-8")
