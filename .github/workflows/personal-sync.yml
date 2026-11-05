@@ -1,0 +1,96 @@
+name: Sync official stable releases
+
+on:
+  workflow_call:
+    inputs:
+      verify_only:
+        description: Validate and test cloud publication without advancing the installed branch
+        type: boolean
+        default: false
+    secrets:
+      HERMES_SYNC_DEPLOY_KEY:
+        required: true
+  workflow_dispatch:
+    inputs:
+      verify_only:
+        description: Validate and test cloud publication without advancing the installed branch
+        type: boolean
+        default: false
+  push:
+    branches: [personal/sync/cloud-migration]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: personal-stable-sync
+  cancel-in-progress: false
+
+jobs:
+  synchronize:
+    if: github.repository == 'YusenZhang0601/hermes-agent' && github.actor == 'YusenZhang0601'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'push' && github.sha || 'personal/stable' }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Load repository-scoped publication credential
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_KEY: ${{ secrets.HERMES_SYNC_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import shlex
+          secret = os.environ['DEPLOY_KEY']
+          if not secret.strip():
+              raise SystemExit('The repository sync deploy key is missing')
+          key = Path(os.environ['RUNNER_TEMP']) / 'personal-sync-key'
+          descriptor = os.open(key, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+          with os.fdopen(descriptor, 'w', encoding='utf-8') as output:
+              output.write(secret.rstrip() + '\n')
+          hosts = key.with_name('personal-sync-hosts')
+          command = ['ssh', '-i', str(key), '-o', 'IdentitiesOnly=yes', '-o', 'BatchMode=yes',
+                     '-o', 'StrictHostKeyChecking=yes', '-o', f'UserKnownHostsFile={hosts}']
+          with Path(os.environ['GITHUB_ENV']).open('a', encoding='utf-8') as output:
+              output.write('GIT_SSH_COMMAND=' + shlex.join(command) + '\n')
+          PY
+          gh api meta --jq '.ssh_keys[]' | awk '{print "[ssh.github.com]:443 " $0}' > "$RUNNER_TEMP/personal-sync-hosts"
+      - name: Prepare official release candidate
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFY_ONLY: ${{ (github.event_name == 'push' || inputs.verify_only) && '1' || '0' }}
+        run: |
+          arguments=()
+          if [ "$VERIFY_ONLY" = 1 ]; then arguments+=(--verify-only); fi
+          python3 personal/sync.py --prepare --state-dir "$RUNNER_TEMP/personal-sync" "${arguments[@]}"
+      - uses: ./.github/actions/setup-pm
+        id: environment
+        if: steps.prepare.outputs.has_update == 'true'
+        with:
+          test-environment: true
+          extras: '["anthropic"]'
+          cache-suffix: personal
+      - name: Validate the exact candidate
+        if: steps.prepare.outputs.has_update == 'true'
+        env:
+          HERMES_PYTHON: ${{ steps.environment.outputs.python-path }}
+          HERMES_TEST_FILE_RETRIES: '0'
+        run: |
+          scripts/run_tests.sh tests/agent/test_auxiliary_custom_endpoint_auth.py tests/agent/test_auxiliary_named_custom_providers.py tests/hermes_cli/test_personal_update_source.py tests/personal/test_sync.py -q
+          python scripts/check --base "$(python -c 'import json; print(json.load(open("personal/upstream.json", encoding="utf-8"))["commit"])')"
+      - name: Publish validated candidate
+        if: steps.prepare.outputs.has_update == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PERSONAL_SYNC_VALIDATED_HEAD: ${{ steps.prepare.outputs.head }}
+        run: python3 personal/sync.py --publish --state-dir "$RUNNER_TEMP/personal-sync"
+      - name: Remove temporary credential
+        if: always()
+        run: rm -f "$RUNNER_TEMP/personal-sync-key" "$RUNNER_TEMP/personal-sync-hosts"

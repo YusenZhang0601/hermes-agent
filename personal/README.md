@@ -13,23 +13,31 @@ The official base is recorded in `upstream.json`. The fork's contribution branch
 
 ## Maintenance
 
-`sync.py` periodically reads the latest official stable release. It builds a disposable candidate,
-merges the release, publishes a candidate branch, and waits for the hosted `Personal regression checks`
-workflow on the exact candidate commit. That workflow builds the candidate's locked test environment
-and runs the personal regressions and source checks on a standard GitHub runner.
-Only a passing candidate advances `personal/stable`, using a normal fast-forward push. Merge
-conflicts and failed checks leave the published version available and record a blocked receipt.
-The authenticated GitHub account and Git authorship are `YusenZhang0601`.
+The `Maintain personal Hermes` GitHub workflow checks every six hours, at minute 23 UTC.
+The repository's default branch is `personal/control`, containing only that scheduled entrypoint
+and its README. The entrypoint calls the validated reusable sync workflow at a pinned commit.
+Application code is published on `personal/stable`. The main branch and upstream contribution
+branches remain separate. Checking, merging, testing and publishing run on standard GitHub runners
+and continue independently of the desktop computer.
 
-The host schedules the standard-library-only script with a private state directory.
-Credentials remain in the host's existing GitHub credential store.
-No model API call is used for ordinary synchronization. Installation is initiated with the desktop
-Update button, including its existing drain, validation and restart behavior.
+`sync.py --prepare` merges a new official release in the disposable runner checkout. The workflow
+then builds that candidate's locked test environment, runs the personal regressions and source
+checks, and invokes `sync.py --publish` for the exact validated commit. Only a passing candidate
+advances `personal/stable`, using a normal fast-forward push and remote commit readback.
+Conflicts and failed checks stop the workflow and retain the previously published version.
 
-```sh
-python personal/sync.py --state-dir /absolute/path/to/private/state
-```
+The user authorized `github-actions[bot]` on 2026-11-06 solely for this repository's automatic
+official-release synchronization. Human-authored fixes retain `YusenZhang0601` authorship.
+A repository-scoped write deploy key, stored as the encrypted `HERMES_SYNC_DEPLOY_KEY` Actions
+secret, permits complete official merges including workflow changes. The built-in `GITHUB_TOKEN`
+is used with read-only API access. The workflow loads a temporary SSH key, verifies GitHub's host
+keys from its HTTPS metadata API, and removes the temporary credential on exit.
 
-The host's `status.json` records the last check and any blocked candidate. `--retry` retries a blocked
-release after investigation. New personal fixes should include behavior tests in the same commit.
+Use the workflow's `verify_only` manual option to run the complete validation and a disposable
+test publication without advancing `personal/stable`. Successful test publications are removed
+after remote readback. Workflow summaries and logs provide the run receipts. Installation is
+initiated with the desktop Update button and its existing drain, validation and restart behavior.
+
+New personal fixes should include behavior tests in the same commit. Changes to the reusable
+workflow itself also update the pinned call in `personal/control` after its validation succeeds.
 When an official release provides an equivalent fix, review and retire the overlapping personal change.

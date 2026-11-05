@@ -88,6 +88,7 @@ def test_published_version_moves_only_after_hosted_validation(repository, tmp_pa
     git(root, "add", ".")
     git(root, "commit", "-m", "official release")
     git(root, "tag", "v1.2.4")
+    git(root, "checkout", "personal/stable")
     monkeypatch.setattr(sync, "UPSTREAM", str(root))
     monkeypatch.setattr(sync, "DESTINATION", str(published))
     real_run = sync.run
@@ -97,17 +98,21 @@ def test_published_version_moves_only_after_hosted_validation(repository, tmp_pa
             return "YusenZhang0601"
         if args[:3] == ["gh", "api", "repos/NousResearch/hermes-agent/releases/latest"]:
             return json.dumps({"tag_name": "v1.2.4", "draft": False, "prerelease": False})
+        if args[:2] == ["gh", "api"] and "/git/ref/heads/" in args[2]:
+            branch = args[2].split("/git/ref/heads/", 1)[1]
+            return git(published, "rev-parse", branch)
         return real_run(args, cwd, **kwargs)
 
-    def check(candidate_root, branch, head):
-        assert git(published, "rev-parse", "personal/stable") == original
-        assert git(published, "rev-parse", branch) == head
-        if not checks_pass:
-            raise RuntimeError("Hosted check failed")
-
     monkeypatch.setattr(sync, "run", run)
-    monkeypatch.setattr(sync, "hosted_check", check)
-    result = sync.synchronize(root, {})
+    prepared = sync.prepare_cloud(root, verify_only=False, run_id="123")
+    assert git(published, "rev-parse", "personal/stable") == original
+    if checks_pass:
+        monkeypatch.setenv("PERSONAL_SYNC_VALIDATED_HEAD", prepared["personal_commit"])
+        result = sync.publish_cloud(root, prepared)
+    else:
+        monkeypatch.delenv("PERSONAL_SYNC_VALIDATED_HEAD", raising=False)
+        with pytest.raises(RuntimeError, match="validated"):
+            sync.publish_cloud(root, prepared)
     current = git(published, "rev-parse", "personal/stable")
     if checks_pass:
         assert result["status"] == "ready"
@@ -115,5 +120,20 @@ def test_published_version_moves_only_after_hosted_validation(repository, tmp_pa
         assert git(published, "show", f"{current}:mine.txt") == "personal"
         assert git(published, "show", f"{current}:official.txt") == "official feature"
     else:
-        assert result["status"] == "blocked"
         assert current == original
+
+
+@pytest.mark.parametrize("repository", ["YusenZhang0601/hermes-agent", "someone/hermes-agent"])
+def test_cloud_bot_is_restricted_to_the_authorized_workflow(monkeypatch, repository):
+    from personal.sync import verify_cloud_context
+
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_REPOSITORY", repository)
+    monkeypatch.setenv("GITHUB_ACTOR", "YusenZhang0601")
+    monkeypatch.setenv("GITHUB_WORKFLOW_REF",
+                       f"{repository}/.github/workflows/personal-sync.yml@refs/heads/personal/stable")
+    if repository == "YusenZhang0601/hermes-agent":
+        verify_cloud_context()
+    else:
+        with pytest.raises(RuntimeError, match="authorized"):
+            verify_cloud_context()
