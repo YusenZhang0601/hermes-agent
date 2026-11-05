@@ -82,12 +82,14 @@ def synchronize(root: Path, previous: dict, *, retry: bool = False) -> dict:
     manifest = json.loads(run([*GIT, "show", f"{base}:personal/upstream.json"], root))
     if manifest["tag"] == tag:
         return {"status": "current", "official_release": tag, "personal_commit": base}
-    if previous.get("status") == "blocked" and previous.get("official_release") == tag and not retry:
+    if (previous.get("status") == "blocked" and previous.get("official_release") == tag
+            and previous.get("personal_commit") == base and not retry):
         return previous
     run([*GIT, "fetch", "--no-tags", UPSTREAM, f"refs/tags/{tag}"], root)
     release_commit = run([*GIT, "rev-parse", "FETCH_HEAD^{commit}"], root)
     run([*GIT, "merge-base", "--is-ancestor", manifest["commit"], release_commit], root)
-    branch = f"personal/sync/{tag}-{base[:10]}"
+    stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+    branch = f"personal/sync/{tag}-{base[:10]}-{stamp}"
     with tempfile.TemporaryDirectory(prefix="hermes-personal-") as scratch:
         candidate = Path(scratch) / "candidate"
         run([*GIT, "worktree", "add", "--detach", str(candidate), base], root)
