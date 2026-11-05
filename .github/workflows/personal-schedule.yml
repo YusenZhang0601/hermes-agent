@@ -1,0 +1,22 @@
+name: Maintain personal Hermes
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      verify_only:
+        description: Validate the cloud update path without publishing an application update
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    uses: YusenZhang0601/hermes-agent/.github/workflows/personal-sync.yml@0812496fd169ca739b90544c18f7c8ec067992aa
+    with:
+      verify_only: ${{ inputs.verify_only || false }}
+    secrets:
+      HERMES_SYNC_DEPLOY_KEY: ${{ secrets.HERMES_SYNC_DEPLOY_KEY }}
