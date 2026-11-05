@@ -65,3 +65,55 @@ def test_merge_conflict_leaves_personal_head_unchanged(repository):
         merge_release(root, release, "v1.2.4")
 
     assert git(root, "rev-parse", "HEAD") == original
+
+
+@pytest.mark.parametrize("checks_pass", [True, False])
+def test_published_version_moves_only_after_hosted_validation(repository, tmp_path, monkeypatch, checks_pass):
+    from personal import sync
+
+    root = repository
+    official_base = git(root, "rev-parse", "HEAD")
+    manifest = root / "personal/upstream.json"
+    manifest.write_text(json.dumps({"repository": "NousResearch/hermes-agent", "tag": "v1.2.3",
+                                    "commit": official_base}) + "\n", encoding="utf-8")
+    (root / "mine.txt").write_text("personal\n", encoding="utf-8")
+    git(root, "add", ".")
+    git(root, "commit", "-m", "personal configuration")
+    original = git(root, "rev-parse", "HEAD")
+    git(root, "branch", "personal/stable")
+    published = tmp_path / "published.git"
+    git(root, "clone", "--bare", str(root), str(published))
+    git(root, "checkout", "official")
+    (root / "official.txt").write_text("official feature\n", encoding="utf-8")
+    git(root, "add", ".")
+    git(root, "commit", "-m", "official release")
+    git(root, "tag", "v1.2.4")
+    monkeypatch.setattr(sync, "UPSTREAM", str(root))
+    monkeypatch.setattr(sync, "DESTINATION", str(published))
+    real_run = sync.run
+
+    def run(args, cwd, **kwargs):
+        if args[:4] == ["gh", "api", "user", "--jq"]:
+            return "YusenZhang0601"
+        if args[:3] == ["gh", "api", "repos/NousResearch/hermes-agent/releases/latest"]:
+            return json.dumps({"tag_name": "v1.2.4", "draft": False, "prerelease": False})
+        return real_run(args, cwd, **kwargs)
+
+    def check(candidate_root, branch, head):
+        assert git(published, "rev-parse", "personal/stable") == original
+        assert git(published, "rev-parse", branch) == head
+        if not checks_pass:
+            raise RuntimeError("Hosted check failed")
+
+    monkeypatch.setattr(sync, "run", run)
+    monkeypatch.setattr(sync, "hosted_check", check)
+    result = sync.synchronize(root, {})
+    current = git(published, "rev-parse", "personal/stable")
+    if checks_pass:
+        assert result["status"] == "ready"
+        assert current == result["personal_commit"]
+        assert git(published, "show", f"{current}:mine.txt") == "personal"
+        assert git(published, "show", f"{current}:official.txt") == "official feature"
+    else:
+        assert result["status"] == "blocked"
+        assert current == original
