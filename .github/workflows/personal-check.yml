@@ -1,0 +1,42 @@
+name: Personal regression checks
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - personal/stable
+      - personal/sync/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: personal-check-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  personal-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-pm
+        id: environment
+        with:
+          test-environment: true
+          extras: '["anthropic"]'
+          cache-suffix: personal
+      - name: Test personal behavior
+        env:
+          HERMES_PYTHON: ${{ steps.environment.outputs.python-path }}
+          HERMES_TEST_FILE_RETRIES: '0'
+        run: >-
+          scripts/run_tests.sh
+          tests/agent/test_auxiliary_custom_endpoint_auth.py
+          tests/hermes_cli/test_personal_update_source.py
+          tests/personal/test_sync.py -q
+      - name: Check personal delta
+        run: python scripts/check --base "$(python -c 'import json; print(json.load(open("personal/upstream.json", encoding="utf-8"))["commit"])')"
