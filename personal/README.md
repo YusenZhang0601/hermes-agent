@@ -8,8 +8,20 @@ The official base is recorded in `upstream.json`. The fork's contribution branch
 
 - Custom auxiliary endpoints use the matching main credential before considering an OpenAI-host
   credential. Regression coverage inspects the Authorization header using fake keys and a mock transport.
+- Model-metadata probes connect directly to local, LAN and Tailscale engines while hosted providers
+  retain environment proxy routing. This includes the shared reader used for llama.cpp properties.
+  The original fix is `358076b4c46f1af3a69fb45b1c6a288e4e5894b0` from issue
+  [#148849](https://github.com/NousResearch/hermes-agent/issues/148849). Its behavior regressions run
+  both on personal changes and before every official-release promotion.
 - This fork's native `main` update channel resolves to `personal/stable`. That branch advances after
   official stable releases pass personal checks. The desktop Update button installs it when requested.
+
+## Probe-fix validation (2026-11-10)
+
+On personal base `2fef947ed85c554a91068bda312dcad71bf19c75`, the new probe suite reports
+12 failures and 1 pass. With the port, ten related test files report 230 passes and no failures,
+including the existing auxiliary authentication and personal-update regressions. The local HTTP
+fixtures exercise inherited proxy bypass and hosted proxy retention without calling a model.
 
 ## Maintenance
 

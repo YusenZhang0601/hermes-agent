@@ -83,7 +83,7 @@ jobs:
           HERMES_PYTHON: ${{ steps.environment.outputs.python-path }}
           HERMES_TEST_FILE_RETRIES: '0'
         run: |
-          scripts/run_tests.sh tests/agent/test_auxiliary_custom_endpoint_auth.py tests/agent/test_auxiliary_named_custom_providers.py tests/hermes_cli/test_personal_update_source.py tests/personal/test_sync.py -q
+          scripts/run_tests.sh tests/agent/test_auxiliary_custom_endpoint_auth.py tests/agent/test_auxiliary_named_custom_providers.py tests/agent/test_probe_proxy_policy.py tests/hermes_cli/test_personal_update_source.py tests/personal/test_sync.py -q
           python scripts/check --base "$(python -c 'import json; print(json.load(open("personal/upstream.json", encoding="utf-8"))["commit"])')"
       - name: Publish validated candidate
         if: steps.prepare.outputs.has_update == 'true'

@@ -25,6 +25,18 @@ def resolve_verify(base_url: str = ""):
     )
 
 
+def _stream_trust_env(url: str) -> bool:
+    """Proxy policy for a metadata HTTP request (see ``agent.model_metadata_probe``).
+
+    The caller is asking a server about itself — its models, its context window, its properties —
+    so the request must reach that server. Local / LAN / Tailscale-CGNAT endpoints are therefore
+    probed directly; hosted providers keep the environment proxy.
+    """
+    from agent.model_metadata_probe import _probe_trust_env
+
+    return _probe_trust_env(url)
+
+
 @contextmanager
 def stream(url: str, *, headers=None, params=None, timeout=10.0, verify=None):
     import httpx
@@ -48,6 +60,7 @@ def stream(url: str, *, headers=None, params=None, timeout=10.0, verify=None):
         timeout=timeout,
         follow_redirects=True,
         event_hooks={"request": [scope_credentials]},
+        trust_env=_stream_trust_env(url),
     ) as client:
         def fetch():
             response = client.send(client.build_request("GET", url, headers=headers, params=params), stream=True)
