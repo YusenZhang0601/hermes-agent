@@ -609,6 +609,9 @@ def get_pricing_entry(
     if bundled_entry:
         return bundled_entry
     if route.base_url:
+        if not api_key and route.billing_mode == "unknown":  # a keyed custom gateway answers a keyless probe 401
+            from agent.auxiliary_custom_auth import configured_endpoint_key
+            api_key = configured_endpoint_key(provider or "", route.base_url)
         entry = _pricing_entry_from_metadata(
             fetch_endpoint_model_metadata(route.base_url, api_key=api_key or ""), route.model,
             source_url=f"{route.base_url.rstrip('/')}/models",

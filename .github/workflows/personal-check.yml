@@ -38,6 +38,8 @@ jobs:
           tests/agent/test_auxiliary_custom_endpoint_auth.py
           tests/agent/test_auxiliary_named_custom_providers.py
           tests/agent/test_probe_proxy_policy.py
+          tests/agent/test_endpoint_context_probe_failure.py
+          tests/hermes_cli/test_model_info_probe_credentials.py
           tests/hermes_cli/test_personal_update_source.py
           tests/personal/test_sync.py -q
       - name: Check personal delta

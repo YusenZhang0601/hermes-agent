@@ -22,7 +22,6 @@ from agent.model_metadata_cache import _write_context_cache, locked_context_cach
 from agent.context_default_record import mark_context_defaulted, records_context_defaults
 from agent.model_metadata_llamacpp import llamacpp_context
 from agent.model_metadata_memo_bounds import MEMO_LOCK, bound_codex_caches, remember_endpoint_models as _remember_endpoint_models
-from agent.model_metadata_probe import _localhost_to_ipv4, _probe_trust_env
 
 from utils import atomic_json_write, base_url_host_matches, base_url_hostname
 
@@ -31,6 +30,8 @@ from agent.message_metadata import PERSISTENCE_ONLY_MESSAGE_FIELDS, unpriced_rep
 from agent.model_metadata_token_memo import (  # _MSG_TOKENS_CACHE: tests and benches read it here
     _MSG_TOKENS_CACHE, MemoPins, lookup_message_tokens, remember_message_tokens,
 )
+from agent.model_metadata_probe import _localhost_to_ipv4, _probe_trust_env  # personal siblings below upstream's imports: clean official merges
+from agent.model_metadata_endpoint_memo import LAST_PUBLISHED_RETENTION_SECONDS, EndpointProbeFailure, distrusts_catalog_hit, endpoint_context_length, endpoint_probe_failure, last_published_context_length, note_lookup
 
 logger = logging.getLogger(__name__)
 
@@ -251,9 +252,9 @@ def _endpoint_disk_cache_get(normalized: str) -> Optional[dict[str, dict[str, An
 
 
 def _endpoint_disk_cache_put(normalized: str, cache: dict[str, dict[str, Any]]) -> None:
-    """Memoize a successful remote ``/models`` probe; expired siblings are dropped."""
+    """Memoize a successful remote ``/models`` probe; siblings older than the retention are dropped."""
     _ttl_memo_put(
-        _get_endpoint_metadata_cache_path(), normalized, cache, _ENDPOINT_MODEL_CACHE_TTL,
+        _get_endpoint_metadata_cache_path(), normalized, cache, LAST_PUBLISHED_RETENTION_SECONDS,
         ts_key="at", value_key="models", what="endpoint model metadata disk cache", ts_first=True)
 
 
@@ -1032,12 +1033,13 @@ def fetch_endpoint_model_metadata(base_url: str, api_key: str = "", force_refres
             return _remember_endpoint_models(memo_key, memo)
     # Blackholed: return empty WITHOUT caching so it is retried once the entry expires.
     if _endpoint_blackholed(normalized):
-        return {}
+        return EndpointProbeFailure()
     alternate = normalized[:-3].rstrip("/") if normalized.endswith("/v1") else normalized + "/v1"
     candidates = [normalized] + ([alternate] if alternate != normalized else [])
     headers = _auth_headers(api_key)
     verify = model_metadata_http.resolve_verify(normalized)
     last_error: Optional[Exception] = None
+    failure = EndpointProbeFailure()
     if local:
         try:
             if detect_local_server_type(normalized, api_key=api_key) == "lm-studio":
@@ -1056,6 +1058,7 @@ def fetch_endpoint_model_metadata(base_url: str, api_key: str = "", force_refres
             with model_metadata_http.stream(url, headers=headers, timeout=(5, 10), verify=verify) as response:
                 if response.status_code in (401, 403):
                     logger.debug("Model metadata probe received HTTP %s from %s; stopping candidate probing", response.status_code, url)
+                    failure.note(response.status_code)
                     break
                 response.raise_for_status()
                 response.read()
@@ -1069,22 +1072,16 @@ def fetch_endpoint_model_metadata(base_url: str, api_key: str = "", force_refres
             return _remember_endpoint_models(memo_key, cache)
         except Exception as exc:
             last_error = exc
+            failure.note(exc)
             _note_if_connect_timeout(exc, normalized)
     if last_error:
         logger.debug("Failed to fetch model metadata from %s/models: %s", normalized, last_error)
-    return _remember_endpoint_models(memo_key, {})
+    return _remember_endpoint_models(memo_key, failure)
 
 
 def _resolve_endpoint_context_length(model: str, base_url: str, api_key: str = "") -> Optional[int]:
     """Resolve context length from an endpoint's live ``/models`` metadata."""
-    endpoint_metadata = fetch_endpoint_model_metadata(base_url, api_key=api_key)
-    matched = endpoint_metadata.get(model)
-    if not matched and len(endpoint_metadata) == 1:
-        matched = next(iter(endpoint_metadata.values()))
-    elif not matched and model:  # substring match; "" would match EVERY key and poison the window
-        matched = next((entry for key, entry in endpoint_metadata.items() if model in key or key in model), None)
-    context_length = matched.get("context_length") if matched else None
-    return context_length if isinstance(context_length, int) else None
+    return endpoint_context_length(note_lookup(base_url, api_key, fetch_endpoint_model_metadata(base_url, api_key=api_key)), model)
 
 
 def _get_context_cache_path() -> Path:
@@ -2056,6 +2053,9 @@ def _resolve_custom_endpoint_context_length(model: str, base_url: str, api_key: 
     if ctx is not None:
         _save_unless_skipped(model, base_url, ctx, provider)
         return ctx
+    failure = endpoint_probe_failure(base_url, api_key)  # 3a. refused/outage: the window it last published
+    if failure is not None and (published := last_published_context_length(model, base_url)):
+        return published
     # 3. Probe-down fallback after endpoint-specific detection failed
     logger.info(
         "Could not detect context length for model %r at %s — defaulting to %s tokens (probe-down). "
@@ -2065,7 +2065,7 @@ def _resolve_custom_endpoint_context_length(model: str, base_url: str, api_key: 
     # 3b. Hardcoded catalog as a last resort: a proxied Anthropic gateway fails the probes above
     # but its model name still matches DEFAULT_CONTEXT_LENGTHS.
     hit = _longest_key_match(DEFAULT_CONTEXT_LENGTHS, model.lower())
-    if hit:
+    if hit and not distrusts_catalog_hit(failure, hit, model):
         logger.info("Using hardcoded context length %s for model %r (custom endpoint, catalog match on %r)", f"{hit[1]:,}", model, hit[0])
         return hit[1]
     # Same silent-256K bug class as the step-9 fallback — warn here too.
