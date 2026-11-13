@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   sync:
-    uses: YusenZhang0601/hermes-agent/.github/workflows/personal-sync.yml@b0c1a7776ea310d146e8eb928b0d922dbf07d4ea
+    uses: YusenZhang0601/hermes-agent/.github/workflows/personal-sync.yml@f1d3541e8ccdd05825e4c1449cc889660e57f3d0
     with:
       verify_only: ${{ inputs.verify_only || false }}
     secrets:
