@@ -6,8 +6,10 @@ The official base is recorded in `upstream.json`. The fork's contribution branch
 
 ## Current changes
 
-- Custom auxiliary endpoints use the matching main credential before considering an OpenAI-host
-  credential. Regression coverage inspects the Authorization header using fake keys and a mock transport.
+- Official v0.23.2 now owns custom auxiliary endpoint credential selection: the matching main or
+  declared provider credential precedes a host-gated ambient OpenAI key. The overlapping personal
+  routing helper was retired during the v0.23.2 integration; the Authorization-header behavior
+  regressions remain to protect the personal contract.
 - Model-metadata probes connect directly to local, LAN and Tailscale engines while hosted providers
   retain environment proxy routing. This includes the shared reader used for llama.cpp properties.
   The original fix is `358076b4c46f1af3a69fb45b1c6a288e4e5894b0` from issue
@@ -78,3 +80,10 @@ initiated with the desktop Update button and its existing drain, validation and 
 New personal fixes should include behavior tests in the same commit. Changes to the reusable
 workflow itself also update the pinned call in `personal/control` after its validation succeeds.
 When an official release provides an equivalent fix, review and retire the overlapping personal change.
+
+## Stable-release integration (2026-11-17)
+
+The v0.23.2 preparation stopped safely at a conflict in `agent/auxiliary_client.py`; no failing
+candidate was published. Upstream now supplies the custom-endpoint credential-order fix, so the
+conflict is resolved with the official implementation rather than overriding either credential
+policy. The separate side-effect-free metadata credential reader and context-probe fixes remain.
