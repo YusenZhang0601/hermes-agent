@@ -88,6 +88,7 @@ def test_model_info_probes_with_the_named_providers_key_env(gateway, home, monke
 
     assert info["model"] == MODEL
     assert info["auto_context_length"] == WINDOW
+    assert not (home / "auth.json").exists(), "A public metadata read must not create credential state"
     assert seen and set(seen) == {f"Bearer {KEY}"}
 
 
@@ -146,3 +147,36 @@ def test_model_info_reads_the_requested_profiles_key(gateway, tmp_path, monkeypa
 
     assert info["auto_context_length"] == WINDOW
     assert seen and set(seen) == {f"Bearer {KEY}"}
+
+
+def test_public_probe_uses_bound_pool_without_housekeeping(gateway, home, monkeypatch):
+    base_url, seen = gateway
+    (home / "config.yaml").write_text(_selfhost_config(base_url, extra="    key_env: TEST_SELFHOST_KEY\n"))
+    monkeypatch.setenv("TEST_SELFHOST_KEY", "dummy-stale-config-key")
+    store = home / "auth.json"
+    payload = json.dumps({"version": 1, "providers": {}, "credential_pool": {"main": [
+        {"id": "bound", "label": "bound", "source": "manual", "auth_type": "api_key",
+         "base_url": base_url, "access_token": KEY, "priority": 0},
+        {"id": "expired", "label": "expired", "source": "manual", "auth_type": "api_key",
+         "base_url": base_url, "access_token": "dummy-expired-key", "priority": 1,
+         "last_status": "dead", "last_status_at": 1},
+    ]}})
+    store.write_text(payload)
+    from hermes_cli.web_routers import models as router
+
+    assert router.get_model_info()["auto_context_length"] == WINDOW
+    assert seen and set(seen) == {f"Bearer {KEY}"}
+    assert store.read_text() == payload
+
+
+def test_public_probe_leaves_malformed_credential_state_untouched(gateway, home, monkeypatch):
+    base_url, _seen = gateway
+    (home / "config.yaml").write_text(_selfhost_config(base_url, extra="    key_env: TEST_SELFHOST_KEY\n"))
+    monkeypatch.setenv("TEST_SELFHOST_KEY", KEY)
+    store = home / "auth.json"
+    store.write_text("{broken")
+    from hermes_cli.web_routers import models as router
+
+    assert router.get_model_info()["auto_context_length"] == WINDOW
+    assert store.read_text() == "{broken"
+    assert not store.with_suffix(".json.corrupt").exists()

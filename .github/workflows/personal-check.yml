@@ -41,6 +41,11 @@ jobs:
           tests/agent/test_endpoint_context_probe_failure.py
           tests/hermes_cli/test_model_info_probe_credentials.py
           tests/hermes_cli/test_personal_update_source.py
-          tests/personal/test_sync.py -q
+          tests/personal/test_sync.py
+          tests/agent/test_metadata_credential_pool.py
+          tests/hermes_cli/test_model_probe_credentials.py
+          tests/hermes_cli/test_model_info_probe_timeout.py
+          tests/hermes_cli/test_auth_store_read_failure.py
+          tests/hermes_cli/test_global_auth_store_memo.py -q
       - name: Check personal delta
         run: python scripts/check --base "$(python -c 'import json; print(json.load(open("personal/upstream.json", encoding="utf-8"))["commit"])')"

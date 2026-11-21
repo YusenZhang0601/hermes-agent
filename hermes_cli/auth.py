@@ -503,7 +503,7 @@ def _global_auth_file_path() -> Optional[Path]:
     return None if _same_path(get_hermes_home(), global_root) else global_root / "auth.json"
 
 
-def _load_global_auth_store() -> dict[str, Any]:
+def _load_global_auth_store(*, read_only: bool = False) -> dict[str, Any]:
     """Load the global-root auth store (read-only fallback, mtime-memoised); ``{}`` when absent or
     unreadable — a malformed global store must never break profile reads."""
     global _global_auth_store_cache
@@ -528,11 +528,11 @@ def _load_global_auth_store() -> dict[str, Any]:
         except Exception:
             pass
     try:
-        store = _load_auth_store(global_path)
+        store = _load_auth_store(global_path, read_only=True) if read_only else _load_auth_store(global_path)
     except Exception:
         _global_auth_store_cache = None
         return {}
-    if cache_key is not None:
+    if cache_key is not None and not read_only:
         _global_auth_store_cache = (*cache_key, store)
     return store
 
@@ -725,7 +725,7 @@ def _empty_auth_store() -> dict[str, Any]:
     return {"version": AUTH_STORE_VERSION, "providers": {}}
 
 
-def _load_auth_store(auth_file: Optional[Path] = None) -> dict[str, Any]:
+def _load_auth_store(auth_file: Optional[Path] = None, *, read_only: bool = False) -> dict[str, Any]:
     auth_file = auth_file or _auth_file_path()
     if not auth_file.exists():
         return _empty_auth_store()
@@ -741,6 +741,8 @@ def _load_auth_store(auth_file: Optional[Path] = None) -> dict[str, Any]:
             auth_file, exc_info=True)
         raise
     except Exception as exc:
+        if read_only:
+            return _empty_auth_store()
         # Genuine corruption: unparseable JSON or non-UTF-8 bytes. Preserve a copy, but never
         # advertise a backup that was not written.
         corrupt_path = auth_file.with_suffix(".json.corrupt")
@@ -933,23 +935,21 @@ def is_runtime_provider_routable(provider_id: str) -> bool:
     return True
 
 
-def read_credential_pool(provider_id: Optional[str] = None) -> dict[str, Any]:
+def read_credential_pool(provider_id: Optional[str] = None, *, read_only: bool = False) -> dict[str, Any]:
     """Return the persisted credential pool, or one provider slice.
 
     In profile mode the global-root ``auth.json`` is a read-only fallback applied per provider ONLY
     when the profile has zero entries for it (``hermes auth add`` in the profile shadows global)."""
-    pool = _load_auth_store().get("credential_pool")
-    pool = pool if isinstance(pool, dict) else {}
-    global_pool = _load_global_auth_store().get("credential_pool")
-    global_pool = global_pool if isinstance(global_pool, dict) else {}
+    options = {"read_only": True} if read_only else {}
+    stores = (_load_auth_store(**options), _load_global_auth_store(**options))
+    pool, global_pool = (p if isinstance(p := store.get("credential_pool"), dict) else {} for store in stores)
 
     if provider_id is None:
         merged = dict(pool)
         for gp_key, gp_entries in global_pool.items():
             existing = merged.get(gp_key)
-            if not (isinstance(gp_entries, list) and gp_entries):
-                continue
-            if not (isinstance(existing, list) and existing):  # profile wins when it has ANY entries
+            if (isinstance(gp_entries, list) and gp_entries
+                    and not (isinstance(existing, list) and existing)):  # profile wins with ANY entries
                 merged[gp_key] = list(gp_entries)
         return merged
 

@@ -87,3 +87,16 @@ The v0.23.2 preparation stopped safely at a conflict in `agent/auxiliary_client.
 candidate was published. Upstream now supplies the custom-endpoint credential-order fix, so the
 conflict is resolved with the official implementation rather than overriding either credential
 policy. The separate side-effect-free metadata credential reader and context-probe fixes remain.
+
+## Stable-release integration candidate (2026-11-21)
+
+The v0.23.3 preparation stopped at metadata imports and the public model-info credential lookup.
+The candidate keeps the official resolver and its credential-pool precedence, with an opt-in
+read-only snapshot for public model-info requests. Only persisted manual API keys explicitly bound
+to the requested origin participate; stale config-seeded keys and OAuth rows do not. Current
+configuration supplies the fallback. An unbound legacy row requires normal runtime binding first,
+rather than a public read assigning it to a possibly changed endpoint. The read path does not
+create, normalize, prune, rotate, refresh, or back up credential state. Normal runtime resolution
+and credential housekeeping are unchanged. The existing proxy and context-probe guards remain.
+
+This candidate is not an application deployment or authorization to advance personal/stable.
